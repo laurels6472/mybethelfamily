@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="app-version" content="v1785898722">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>My Bethel Argilan Family</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html{height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+body{min-height:100%;font-family:Georgia,serif;background:#0f0c29;color:#fff;}
+#root{min-height:100%;display:flex;flex-direction:column;}
+input,button,select,textarea{font-family:Georgia,serif;}
+button{cursor:pointer;border:none;outline:none;}
+input,textarea{outline:none;border:none;}
+.pulse{animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:2px;}
+::-webkit-scrollbar-track{background:transparent;}
+/* Scrollable content wrapper */
+.tab-content{flex:1;-webkit-overflow-scrolling:touch;scroll-behavior:smooth;padding-bottom:env(safe-area-inset-bottom,40px);}
+/* Make sure all tab panels scroll naturally */
+.tab-panel{min-height:0;overflow-y:auto;}
+.fab{position:fixed;bottom:24px;right:16px;z-index:800;width:54px;height:54px;border-radius:27px;display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:transform .2s;}
+.fab:active{transform:scale(.9);}
+.overlay{position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.7);display:flex;align-items:flex-end;animation:fadeIn .15s ease;}
+.modal{width:100%;max-width:480px;margin:0 auto;border-radius:24px 24px 0 0;background:linear-gradient(180deg,#1a1a2e,#111228);animation:slideUp .25s ease;overflow:hidden;}
+.modal-full{position:fixed;inset:0;z-index:1000;background:linear-gradient(160deg,#0a0818,#111228);display:flex;flex-direction:column;animation:fadeIn .2s ease;}
+.card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:12px 14px;}
+.lbl{font-size:10px;color:#444;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;}
+
+/* PIN text security — hides digits as dots like a password field */
+input.pin-field { -webkit-text-security: disc; text-security: disc; }
+input.pin-field.show-pin { -webkit-text-security: none; text-security: none; }
+/* PIN pad touch targets */
+button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+/* Mobile keyboard + input improvements */
+input, textarea, select {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  font-size: 16px !important; /* prevent iOS zoom on focus */
+}
+textarea { overflow-y: auto; }
+input:focus, textarea:focus {
+  outline: none;
+  border-color: rgba(192,202,51,.5) !important;
+  box-shadow: 0 0 0 2px rgba(192,202,51,.15);
+}
+</style>
+
+<script>
+// ─── Notifications + Service Worker ─────────────────────────────────────────
+window._sendNotif = function(title, body, tag) {
+  if (typeof Notification === 'undefined') return;
+  if (Notification.permission === 'granted') {
+    try { new Notification(title || 'FamilyMaster', { body: body||'', icon:'/icon-192.png', tag:tag||'fm', requireInteraction:true }); } catch(e) {}
+  } else if (Notification.permission === 'default') {
+    Notification.requestPermission().then(function(p) { if (p === 'granted') window._sendNotif(title, body, tag); });
+  }
+};
+document.addEventListener('click', function askOnce() {
+  if (Notification.permission === 'default') Notification.requestPermission();
+  document.removeEventListener('click', askOnce);
+}, {once:true});
+// ── Service Worker (inline — try /sw.js first, then blob fallback) ──────────
+var SW_CODE = [
+  "self.addEventListener('install',function(e){self.skipWaiting();});",
+  "self.addEventListener('activate',function(e){e.waitUntil(self.clients.claim());});",
+  "self.addEventListener('push',function(e){",
+  "  var d={};try{d=e.data?e.data.json():{};}catch{}",
+  "  e.waitUntil(self.registration.showNotification(d.title||'FamilyMaster',{",
+  "    body:d.body||'New update',icon:'/icon-192.png',badge:'/icon-192.png',",
+  "    vibrate:[200,100,200],tag:d.tag||'fm',requireInteraction:true",
+  "  }));",
+  "});",
+  "self.addEventListener('notificationclick',function(e){",
+  "  e.notification.close();",
+  "  e.waitUntil(clients.matchAll({type:'window'}).then(function(c){",
+  "    for(var i of c){if('focus' in i)return i.focus();}",
+  "    if(clients.openWindow)return clients.openWindow('/');",
+  "  }));",
+  "});"
+].join('\n');
+window._SW_CODE = SW_CODE;
+
+function _registerSW() {
+  if (!('serviceWorker' in navigator)) return;
+  // Try the hosted /sw.js first (works on GitHub Pages when sw.js is uploaded alongside index.html)
+  navigator.serviceWorker.register('/sw.js')
+    .then(function(r){ window._swReg=r; console.log('[FM] SW ready'); })
+    .catch(function() {
+      // Fallback: register from URL.createObjectURL on same-origin page
+      // (only works on localhost — on GitHub Pages, upload sw.js alongside index.html)
+      try {
+        var blob = new Blob([SW_CODE], {type:'text/javascript'});
+        var url  = URL.createObjectURL(blob);
+        navigator.serviceWorker.register(url)
+          .then(function(r){ window._swReg=r; })
+          .catch(function(e){ console.info('[FM] Push SW unavailable — in-app notifications active.'); });
+      } catch(e) {}
+    });
+}
+window.addEventListener('load', _registerSW);
+
+// Helper: download sw.js from the app itself
+window._downloadSW = function() {
+  var a = document.createElement('a');
+  a.href = 'data:text/javascript;charset=utf-8,' + encodeURIComponent(SW_CODE);
+  a.download = 'sw.js';
+  a.click();
+};
+</script>
+</head>
+<script>
+window._safeConfirm = function(msg) {
+  // iOS WKWebView blocks window.confirm — use a global flag instead
+  // Returns true always (admin should double-tap to confirm actions)
+  return true;
+};
+</script>
+
+<script>
+// Keep the bootstrap parseable on older embedded WebViews.
+if(!Array.prototype.at){Array.prototype.at=function(i){if(i<0)i=this.length+i;return this[i];};}
+if(!String.prototype.at){String.prototype.at=function(i){if(i<0)i=this.length+i;return this[i];};}
+</script>
+<body>
+<div id="root"></div>
+
+<script>
+// Firebase
+var db=null;
+function _storageKey(p){return '_s_'+p.replace(/[^a-zA-Z0-9]/g,'_');}
+function _writeLocal(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true;}catch(e){console.warn('[FM] Local save failed',e);return false;}}
+function initFirebase(cfg){try{
+  if(!window.firebase||!cfg||typeof cfg!=='object')return false;
+  if(firebase.apps.length)firebase.app().delete();
+  firebase.initializeApp(cfg);
+  db=firebase.database();
+  _writeLocal('fb_cfg',cfg);
+  return true;
+}catch(e){db=null;console.warn('[FM] Firebase unavailable; local save remains active.',e);return false;}}
+(function(){try{var s=localStorage.getItem('fb_cfg');if(s)initFirebase(JSON.parse(s));}catch(e){console.warn('[FM] Saved Firebase settings could not be loaded.',e);}})();
+function syncSet(p,v){
+  _writeLocal(_storageKey(p),v);
+  if(db)db.ref('argilan/'+p).set(v).catch(function(e){console.warn('[FM] Cloud save failed; local copy kept.',e);});
+}
+function syncGet(p){try{return JSON.parse(localStorage.getItem('_s_'+p.replace(/[^a-zA-Z0-9]/g,'_')));}catch(e){return null;}}
+
+// ═══ UNIVERSAL FIREBASE SYNC ══════════════════════════════════════════════════
+
+
+// Patch syncSet — track sync status AND keep rolling localStorage backup
+var _originalSyncSet = syncSet;
+var _backupData = (function(){
+  try{ return JSON.parse(localStorage.getItem('_fm_backup')||'{}'); }catch{ return {}; }
+})();
+syncSet = function(p, v) {
+  setSyncStatus('syncing');
+  _originalSyncSet(p, v);
+  // Write to rolling backup — keeps ALL data safe even if Firebase is down
+  try{
+    _backupData[p] = v;
+    _backupData['_ts'] = Date.now();
+    localStorage.setItem('_fm_backup', JSON.stringify(_backupData));
+  }catch{}
+  setTimeout(function() { setSyncStatus('synced'); }, 800);
+};
+// On startup: if Firebase is empty for a path, restore from backup
+function restoreFromBackup(path){
+  var v = syncGet(path);
+  if(v !== null) return v; // Firebase has it
+  var backed = _backupData[path];
+  if(backed !== undefined) return backed;
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function syncOn(p,cb){var l=syncGet(p);if(l!==null)cb(l);if(db)db.ref('argilan/'+p).on('value',function(s){var v=s.val();if(v!==null){_writeLocal(_storageKey(p),v);cb(v);}});return function(){if(db)db.ref('argilan/'+p).off();};}
+// window.storage polyfill
+window.storage={
+  get:function(k){return new Promise(function(res,rej){try{var v=localStorage.getItem('ws_'+k);if(v===null)rej(new Error('nf'));else res({key:k,value:v});}catch(e){rej(e);}});},
+  set:function(k,v){return new Promise(function(res,rej){try{
+    localStorage.setItem('ws_'+k,String(v));
+    if(db)db.ref('argilan/ws/'+k.replace(/[^a-zA-Z0-9]/g,'_')).set(String(v)).catch(function(e){console.warn('[FM] Cloud save failed; local copy kept.',e);});
+    res({key:k,value:v});
+  }catch(e){rej(e);}});},
+  delete:function(k){return new Promise(function(res,rej){try{localStorage.removeItem('ws_'+k);res({key:k,deleted:true});}catch(e){rej(e);}});},
+  list:function(p){return new Promise(function(res,rej){try{var ks=Object.keys(localStorage).filter(function(k){return k.indexOf('ws_')===0&&(!p||k.slice(3).indexOf(p)===0);}).map(function(k){return k.slice(3);});res({keys:ks});}catch(e){rej(e);}});}
+};
+// Notifications
+function askNotifPerm(){if('Notification'in window&&Notification.permission==='default')Notification.requestPermission();}
+function fireBrowserNotif(t,b){if('Notification'in window&&Notification.permission==='granted')try{new Notification('My Bethel — '+t,{body:b||''});}catch(e){}}
+// Sound system — volume-aware
+var _actx=null;
+function _ctx(){if(!_actx)_actx=new(window.AudioContext||window.webkitAudioContext)();return _actx;}
+function beep(f,d,v,t){
+  try{
+    var lv=parseInt(localStorage.getItem('alarm_vol')||'2');
+    if(lv===0)return;
+    var vols=[0,.08,.2,.5,1.0];
+    var vol=(v||.2)*((vols[lv]||.2)/0.2);
+    var c=_ctx(),o=c.createOscillator(),g=c.createGain();
+    o.connect(g);g.connect(c.destination);
+    o.type=t||'sine';o.frequency.value=f;
+    g.gain.setValueAtTime(Math.min(vol,1),c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+d);
+    o.start(c.currentTime);o.stop(c.currentTime+d);
+  }catch(e){}
+}
+function playSound(type){
+  var lv=parseInt(localStorage.getItem('alarm_vol')||'2');
+  if(lv===0)return;
+  var S={
+    clockIn:function(){beep(440,.08,.2);setTimeout(function(){beep(660,.18,.2)},100);},
+    clockOut:function(){beep(660,.08,.2);setTimeout(function(){beep(440,.18,.2)},100);},
+    notif:function(){beep(880,.06,.2);setTimeout(function(){beep(1100,.12,.2)},90);},
+    alert:function(){
+      var reps=lv>=4?6:3;
+      for(var i=0;i<reps;i++)setTimeout(function(){beep(320,.25,.4,'square')},i*350);
+      if(lv>=4&&navigator.vibrate)navigator.vibrate([300,100,300,100,500,100,500]);
+    },
+    payment:function(){beep(523,.08,.2);setTimeout(function(){beep(659,.08,.2)},110);setTimeout(function(){beep(784,.08,.2)},220);setTimeout(function(){beep(1047,.35,.25)},340);},
+    reminder:function(){
+      var reps=lv>=3?6:3;
+      for(var i=0;i<reps;i++)setTimeout(function(){beep(880,.15,.2)},i*220);
+      if(lv>=4&&navigator.vibrate)navigator.vibrate([200,100,200,100,400]);
+    },
+    success:function(){beep(523,.1,.2);setTimeout(function(){beep(784,.22,.25)},140);},
+    claim:function(){beep(440,.06,.2);setTimeout(function(){beep(550,.06,.2)},80);setTimeout(function(){beep(660,.2,.2)},160);}
+  };
+  if(S[type])S[type]();
+}
+// Google Calendar
+var gcalReady=false,gcalToken=null;
+function initGcal(cid,cb){
+  if(!window.google){cb(false,'GIS not loaded');return;}
+  window._gcalClient=google.accounts.oauth2.initTokenClient({
+    client_id:cid,scope:'https://www.googleapis.com/auth/calendar.events',
+    callback:function(r){if(r.error){gcalReady=false;if(cb)cb(false,r.error);return;}gcalToken=r.access_token;gcalReady=true;localStorage.setItem('gcal_cid',cid);if(cb)cb(true,'');}
+  });
+}
+function createGcalEvent(cal,ev,cb){
+  if(!gcalToken){if(cb)cb(null,'not authenticated');return;}
+  fetch('https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(cal)+'/events',{method:'POST',headers:{'Authorization':'Bearer '+gcalToken,'Content-Type':'application/json'},body:JSON.stringify(ev)})
+    .then(function(r){return r.json();}).then(function(d){if(cb)cb(d,null);}).catch(function(e){if(cb)cb(null,e.message);});
+}
+// ─── Sync Status (pure JS, no React) ──────────────────────────────────────────
+var _syncStatus = 'synced';
+var _syncStatusListeners = [];
+function setSyncStatus(s) {
+  _syncStatus = s;
+  _syncStatusListeners.forEach(function(fn) { try { fn(s); } catch {} });
+}
+// Patch syncSet to track sync status (runs before React loads, safe)
+var _origSyncSet = syncSet;
+syncSet = function(p, v) {
+  setSyncStatus('syncing');
+  _origSyncSet(p, v);
+  setTimeout(function() { setSyncStatus('synced'); }, 800);
+};
+// Auto-sync known localStorage keys to Firebase on startup
+function autoSyncLocalToFirebase() {
+  var family = ['laurel','eric','ryan','kayla','ashelyn','mykah','jacob'];
+  family.forEach(function(pid) {
+    var v = localStorage.getItem('journal_' + pid);
+    if (v && !syncGet('journals/' + pid)) {
+      try { syncSet('journals/' + pid, JSON.parse(v)); } catch {}
+    }
+  });
+  var pins = localStorage.getItem('argilan_pins');
+  if (pins && !syncGet('pins')) {
+    try { syncSet('pins', JSON.parse(pins)); } catch {}
+  }
+}
+// Version check — auto-reload when new deploy detected
+var _vcheckInterval = null;
+function startVersionCheck() {
+  if (_vcheckInterval) return;
+  _vcheckInterval = setInterval(function() {
+    if (!db) return;
+    db.ref('argilan/app_version').once('value', function(snap) {
+      var v = snap.val();
+      var local = localStorage.getItem('_app_version');
+      if (v && local && v !== local) {
+        localStorage.setItem('_app_version', v);
+        // Reload once per published version so stale cached modules are replaced.
+        window.location.reload();
+      } else if (v && !local) {
+        localStorage.setItem('_app_version', v);
+      }
+    });
+  }, 60000);
+}
+</script>
+<!-- Load the app in dependency order. Keeping each page/module separate makes
+     deployments and targeted updates possible without one giant HTML file. -->
+<script src="js/01-core-hooks-login.js"></script>
+<script src="js/02-curriculum-data-school.js"></script>
+<script src="js/03-tasks-messenger-gradebook.js"></script>
+<script src="js/04-jw-spiritual-meal-science.js"></script>
+<script src="js/05-dka-curriculum-v3.js"></script>
+<script src="js/06-journal-schedule-menu-myday.js"></script>
+<script src="js/07-timeeditor-workpanel-attendance-clock.js"></script>
+<script src="js/08-dka-module-morning-routine.js"></script>
+<script src="js/09-schedrequests-bethel-music.js"></script>
+<script src="js/10-sop-calendar-fieldtrips.js"></script>
+<script src="js/11-mount.js"></script>
+</body>
+</html>
